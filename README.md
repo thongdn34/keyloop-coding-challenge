@@ -2,6 +2,20 @@
 
 React + TanStack Query frontend, NestJS REST API and persistent PostgreSQL in one Dockerized monorepo.
 
+## Public demo
+
+**[Launch the Unified Service Scheduler](https://keyloop-service-scheduler-29lh.onrender.com/)** · [API health](https://keyloop-service-scheduler-29lh.onrender.com/api/health)
+
+Deployed on Render (Singapore) using the Docker web service `srv-dbgd25rl550s738jtc9g` and a managed PostgreSQL database. Free-tier instances may require a cold start. A working public URL does not imply that the most recent commit has finished deploying; check the deployment tracker below.
+
+## CI and Render deployment tracking
+
+- [Build & Test](https://github.com/thongdn34/keyloop-coding-challenge/actions/workflows/ci.yml): verifies Jest tests, TypeScript builds and Docker image on pushes and pull requests.
+- [Render Deployment Monitor](https://github.com/thongdn34/keyloop-coding-challenge/actions/workflows/render-deployment.yml): runs on changes to `main`, manual dispatch, and every six hours. Render **automatically deploys pushes to `main`**; this workflow monitors rather than triggering a duplicate deployment.
+- Set the GitHub Actions repository secret `RENDER_API_KEY` (Render Dashboard → Account Settings → API Keys) to enable commit-specific tracking through Render's Deploy API. The key is never printed. Without it, the workflow performs only an HTTP availability smoke test and **cannot establish which commit was deployed**.
+- Deployment-specific status can also be inspected in the [Render Dashboard](https://dashboard.render.com/web/srv-dbgd25rl550s738jtc9g). The Render web service must have `DATABASE_URL` set to the database's **Internal Database URL** via Render's Environment settings; never put credentials in this repository.
+
+
 ## Run locally
 
 ```bash
