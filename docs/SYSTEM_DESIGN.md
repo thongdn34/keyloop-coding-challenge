@@ -8,7 +8,7 @@ description: Architecture, booking rules, and limits of the Unified Service Sche
 
 # System Design — Unified Service Scheduler
 
-The shipped demo is a modular monolith: a React client, a NestJS API, and PostgreSQL, packaged as one Docker image. This page is the design of that system. Statements below come from this document's previous scope, the README, and the code they describe. Anything those sources leave undecided is marked **Gap**.
+The shipped demo is a modular monolith: a React client, a NestJS API, and PostgreSQL, packaged as one Docker image. This page describes the implemented system and the production controls required to operate it safely. Requirements that are designed but not implemented in the challenge build are labelled **Production design**.
 
 The running demo is [https://keyloop-service-scheduler-29lh.onrender.com/](https://keyloop-service-scheduler-29lh.onrender.com/). `GET /api/health` on that host returns `{"status":"ok"}`.
 
@@ -42,24 +42,15 @@ In scope for the demo:
 - A confirmed appointment stored in PostgreSQL.
 - A list of appointments in the UI, refreshed after a successful booking.
 
-Out of scope, and not designed here: business hours, breaks, bay suitability, appointment edits, cancellations, holidays, authentication, authorization, and protection of personal data. See [section 10](#10-open-gaps).
+The challenge build does not yet enforce business hours, breaks, bay suitability, appointment edits, cancellations, holidays, authentication, authorization, or personal-data controls. Their required behavior is specified in [section 10](#10-production-requirements-and-controls), so they can be implemented without making product-policy decisions in code.
 
 ## 4. Architecture
 
-One NestJS process serves the API and the built React assets. A scheduler service owns booking rules. TypeORM maps the tables. PostgreSQL stores confirmed bookings and is the serialization point.
+One Node 22 process on Render in Singapore serves the API and the built React assets. The advisor and PostgreSQL sit outside that process. Inside it, NestJS accepts the request, the scheduler owns the booking rules, and TypeORM talks to PostgreSQL.
 
-```mermaid
-flowchart TB
-  UI["React UI"]:::app
-  API["NestJS API"]:::app
-  Svc["Scheduler service"]:::app
-  DB[("PostgreSQL")]:::data
-  UI -->|"HTTPS /api"| API --> Svc -->|"transaction and lock"| DB
-  classDef app fill:#E7F6EF,stroke:#0F6E56,color:#0F6E56
-  classDef data fill:#FFF6E8,stroke:#8A5A00,color:#6B4500
-```
+<iframe src="{{ '/diagrams/scheduler-runtime.html' | relative_url }}" title="Scheduler runtime" style="width: 100%; height: 1080px; border: 1px solid #e6e6e6; border-radius: 8px;"></iframe>
 
-The same process serves the static React build. That response is not drawn as a second arrow, so the request path stays one way.
+[Open the runtime diagram]({{ '/diagrams/scheduler-runtime.html' | relative_url }}) if the frame is too small. The figure has one path: advisor, React UI, Render web, the Node process, NestJS API, scheduler, TypeORM, then PostgreSQL. The Render region wraps the web service and the process. The Node process is the inner trust boundary. Supporting limits, including no authentication and the dealership lock, are on the diagram cards rather than extra arrows.
 
 | Part | Responsibility |
 | --- | --- |
@@ -78,7 +69,7 @@ Desired start is an instant. The UI reads a local date-time and sends UTC via `D
 
 Overlap is half-open. An existing confirmed appointment conflicts when `existing.start < requested.end` and `existing.end > requested.start`. Touching endpoints do not conflict: 10:00–11:00 may sit beside 11:00–12:00. The unit test in `apps/api/src/scheduler.service.spec.ts` covers that pair of cases. Only rows with status `confirmed` at the same dealership are considered.
 
-Duration comes from the service type. The requested end is start plus `durationMinutes`. Candidate resources are active bays at that dealership, and active technicians at that dealership who have a skill row for that service type. The service takes the first free bay and the first free technician in ascending id order.
+Duration comes from the service type. The requested end is start plus `durationMinutes`. Candidate resources are active bays at that dealership, and active technicians at that dealership who have a skill row for that service type. Stable first-fit is the intended demo assignment policy: choose the lowest-id free bay and lowest-id qualified free technician. It is deterministic and easy to explain, although a production rollout should measure load distribution before retaining it.
 
 ```mermaid
 flowchart TB
@@ -103,13 +94,13 @@ flowchart TB
 5. Inside the lock the service loads the vehicle, the service type, and the free bay and technician again. It refuses the booking when either resource is missing.
 6. On success it inserts one appointment: the vehicle's customer, the chosen bay and technician, the computed end, and status `confirmed`. The UI then invalidates the appointment query and reloads the list.
 
-A conflict throws NestJS `ConflictException` with the message `Technician or service bay unavailable for entire appointment`, which the API returns as HTTP 409. Unknown dealership, vehicle, or service type is HTTP 404. Identifiers must be integers greater than zero.
+A conflict throws NestJS `ConflictException` with the message `Technician or service bay unavailable for entire appointment`, which the API returns as HTTP 409. Unknown dealership, vehicle, or service type is HTTP 404. Identifiers must be integers greater than zero. `startAt` must be a future ISO 8601 instant with `Z` or an explicit offset; optional seconds and fractional seconds are accepted, including the millisecond form produced by `Date.toISOString()`.
 
 The availability response includes `available`, `startAt`, `endAt`, `durationMinutes`, `serviceBay`, and `technician`. Either resource is null when that side is busy. `available` is true only when both are present.
 
 ## 6. Data
 
-TypeORM creates and alters tables at startup (`synchronize: true` in `apps/api/src/app.module.ts`). Relationships are integer columns on the entities. The entity classes do not declare foreign keys.
+Schema changes use versioned TypeORM migrations with `synchronize: false` in every environment. The baseline migration is idempotent so it can adopt the original demo database as well as create an empty database. Entity relations and database foreign keys use restrictive deletion for booked business records and cascading deletion only for technician-skill join rows. Check constraints require positive service duration, a positive appointment interval, and a known appointment status. Partial interval indexes support the overlap query.
 
 ```mermaid
 flowchart TB
@@ -143,7 +134,8 @@ The controller is `apps/api/src/scheduler.controller.ts`. JSON field names on a 
 
 | Method | Path | Behavior |
 | --- | --- | --- |
-| `GET` | `/api/health` | Returns `{"status":"ok"}`. Does not query PostgreSQL. |
+| `GET` | `/api/health` | Runs `SELECT 1`; returns `{"status":"ok","database":"ok"}` only when PostgreSQL is reachable. |
+| `GET` | `/api/metrics` | Prometheus text for request counts, HTTP 5xx counts, and request-duration histograms. |
 | `GET` | `/api/catalog` | Dealerships, customers, vehicles, and service types. |
 | `POST` | `/api/availability` | Advisory check. No lock and no insert. |
 | `POST` | `/api/appointments` | Book inside the dealership lock, or HTTP 409. |
@@ -159,7 +151,11 @@ Example body from the README: `{"dealershipId":1,"vehicleId":1,"serviceTypeId":1
 
 Render runs that image as the web service `keyloop-service-scheduler` in Singapore on the free plan (`render.yaml`). The platform health check uses `/api/health`. `DATABASE_URL` is set in the Render environment to the database internal URL and is not stored in this repository. When `DB_SSL=true`, the client uses TLS and does not verify the server certificate. `render.yaml` does not set that variable.
 
-NestJS writes its process log to stdout. Render keeps build and runtime logs. Those two streams are the observability the demo has. `GET /api/health` is the liveness signal.
+Every API response carries `x-correlation-id` and W3C `traceparent`. A valid caller correlation id is preserved; otherwise the API creates one. Completion logs are structured JSON and include correlation id, trace id, span id, route, status, and duration. The process exposes Prometheus-format request, error, and duration metrics at `/api/metrics`. These in-memory counters reset on restart, so production must scrape them into durable monitoring.
+
+`GET /api/health` is a readiness signal because it executes `SELECT 1` against PostgreSQL. Process/container state remains the liveness signal; liveness must not depend on the database or an outage could cause a restart loop.
+
+**Production alert policy.** Page the on-call engineer when readiness fails for 3 consecutive minutes, HTTP 5xx exceeds 2% for 5 minutes with at least 50 requests, booking p95 exceeds 500 ms for 10 minutes, or no successful booking is observed during a known busy period. Ticket-level alerts cover monthly SLO burn, backup failure, capacity above 70%, and certificate/secret expiry within 14 days. Every page links to a runbook and includes region, deployment version, correlation ids, and a dashboard time range.
 
 CI on GitHub Actions runs the Jest suite, the TypeScript build, and a Docker image build. A second workflow monitors the Render service; Render itself deploys pushes to `main`.
 
@@ -172,24 +168,41 @@ CI on GitHub Actions runs the Jest suite, the TypeScript build, and a Docker ima
 | Isolation | `READ COMMITTED` plus that lock. The lock, not the isolation level alone, stops two overlapping confirms for one dealership. |
 | Overlap | Half-open interval. Adjacent appointments are allowed. |
 | Assignment | Lowest id among active, skilled, non-overlapping resources. |
-| Schema changes | TypeORM `synchronize: true` for the demo. |
+| Schema changes | Versioned TypeORM migrations; `synchronize` is disabled. |
 | Time | Instants in `timestamptz`. The client converts local input to UTC. |
 
-## 10. Open gaps
+## 10. Production requirements and controls
 
-> **Gap.** No latency, availability, recovery, or capacity target is stated.
+The following targets define the production acceptance criteria. They are not claims about the free-tier demo.
 
-> **Gap.** Business hours, breaks, bay suitability, appointment editing, cancellations, holidays, authentication, authorization, and personal-data protection are named as production needs and are not designed.
+### Service levels, recovery, and capacity
 
-> **Gap.** Production schema change is not designed beyond the note that `synchronize: true` must be replaced with versioned migrations and stronger database constraints. Foreign keys are not declared.
+- **Latency:** monthly p95 below 300 ms for catalog and availability, below 500 ms for booking, and p99 below 1 second, measured at the API edge and excluding client network time.
+- **Availability:** 99.9% monthly for availability and booking APIs. Planned maintenance announced at least 48 hours ahead is excluded; database and hosting failures are included.
+- **Recovery:** PostgreSQL point-in-time recovery with encrypted daily backups, a recovery point objective of 5 minutes, and a recovery time objective of 30 minutes. Perform and record a restore exercise every quarter.
+- **Capacity:** initial sizing is 50 dealerships, 200 concurrently active advisors, 20 booking attempts per second for a 5-minute burst, and 5 million retained appointments. Load tests must prove the latency targets at 150% of this baseline. Scale up at 70% sustained database CPU, connection-pool use, or storage IOPS, and reassess advisory-lock contention by dealership.
 
-> **Gap.** The design does not say which free technician or bay should be chosen. The service uses ascending id.
+### Scheduling policy
 
-> **Gap.** `validStart` in `apps/api/src/scheduler.service.ts` compiles a pattern whose digit tokens are escaped twice, so a normal ISO 8601 instant does not match. The UI sends `Date.toISOString()`, which is that form and also includes milliseconds the pattern does not describe. Availability and booking then fail the start check before the overlap rule runs.
+- Each dealership has an IANA timezone, weekly opening intervals, and dated closure intervals for holidays or exceptional closures. The entire appointment must fit in one open interval after conversion from the submitted instant; daylight-saving transitions use the timezone database.
+- Technician breaks, training, leave, and bay maintenance are half-open unavailability intervals. They participate in the same overlap calculation as confirmed appointments.
+- Service types declare required bay capabilities; bays declare their capabilities. A bay is a candidate only when it contains every capability required by the service.
+- Rescheduling uses `PATCH /appointments/:id` with an `If-Match` version. It takes the dealership lock, validates the new interval, reallocates resources using the normal policy, and updates atomically. A stale version returns 412 and unavailable resources return 409.
+- Cancellation uses `POST /appointments/:id/cancel` with a reason and idempotency key. It takes the dealership lock, changes `confirmed` to `cancelled`, releases the slot immediately, and returns the existing result on retries. Confirmed appointments are never physically deleted.
+- Every create, reschedule, and cancellation writes an immutable audit event containing actor, dealership, prior and new values, timestamp, correlation id, and reason.
 
-> **Gap.** Correlation ids, request durations, error metrics, tracing, and actionable alerts are named as a production extension. They are not built. The health check does not query the database.
+### Identity, authorization, and personal data
 
-> **Gap.** The automated test proves adjacent slots do not overlap. It does not run two concurrent bookings. The design asks for that coverage, in CI, before real use.
+- Advisors authenticate with the organization's OpenID Connect provider using Authorization Code with PKCE. The API validates short-lived signed access tokens by issuer, audience, expiry, and key id. Service-to-service clients use separate credentials; shared API keys are prohibited.
+- Roles are `advisor` (read and create within assigned dealerships), `service-manager` (also reschedule and cancel), and `platform-admin` (configuration only). Dealership ids come from token scopes and are checked on every query and mutation; a body or query parameter cannot expand access.
+- TLS is required in transit. PostgreSQL volumes and backups are encrypted at rest. Secrets live in the deployment secret store and rotate at least every 90 days.
+- Customer name, email, registration, and appointment history are personal data. They are excluded from application logs and metrics, masked in support views, and available only to dealership-scoped roles. Production responses return only fields needed by the current screen.
+- Retain appointments and audit records according to the approved regional policy, then delete or irreversibly anonymize personal fields. Fulfil access and erasure requests through audited workflows, subject to legal retention holds. Backups expire on the same documented schedule.
+- Security events include failed authentication, denied dealership access, privilege changes, bulk export, and unusual lookup volume. Send them to the centralized security log with tamper-resistant retention.
+
+### Verification status
+
+The automated suite now covers half-open adjacency, UTC milliseconds, explicit timezone offsets, rejection of offset-free local time, and two simultaneous booking attempts for one resource pair. The concurrency test expects exactly one confirmation and one conflict. A production pipeline must additionally run the same scenario against PostgreSQL, migration up/down tests, authorization tests, restore drills, and the capacity test above.
 
 ## 11. GenAI collaboration
 
@@ -202,10 +215,10 @@ Per-dealership advisory transaction locks are the contention control adopted for
 | Claim | Source |
 | --- | --- |
 | Layers, lock, half-open overlap, advisory check, 409, health, demo limits | This design, checked against `apps/api/src/scheduler.service.ts` and `scheduler.controller.ts` |
-| Entities and the absence of foreign keys | `apps/api/src/entities.ts` |
-| Schema sync and static files | `apps/api/src/app.module.ts` |
+| Entities and foreign-key relations | `apps/api/src/entities.ts` |
+| Migrations and static files | `apps/api/src/app.module.ts`, `apps/api/src/migrations/` |
 | Seed contents | `apps/api/src/seed.ts` |
 | UI behavior | `apps/web/src/App.tsx` |
-| Adjacent-slot test | `apps/api/src/scheduler.service.spec.ts` |
+| Date, adjacent-slot, and concurrent-booking tests | `apps/api/src/scheduler.service.spec.ts` |
 | Image and local runtime | `Dockerfile`, `docker-compose.yml` |
 | Render service, region, health path | `render.yaml`, `README.md` |
