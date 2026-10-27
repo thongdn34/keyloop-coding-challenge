@@ -71,6 +71,12 @@ Overlap is half-open. An existing confirmed appointment conflicts when `existing
 
 Duration comes from the service type. The requested end is start plus `durationMinutes`. Candidate resources are active bays at that dealership, and active technicians at that dealership who have a skill row for that service type. Stable first-fit is the intended demo assignment policy: choose the lowest-id free bay and lowest-id qualified free technician. It is deterministic and easy to explain, although a production rollout should measure load distribution before retaining it.
 
+A confirmed booking follows the single path on the runtime diagram. The advisor submits from the React UI, Render delivers the request to the Node process, NestJS calls the scheduler, and TypeORM writes PostgreSQL. The diagram opens in Live, so the path plays on load. Choosing Still keeps that choice for the next visit.
+
+<iframe src="{{ '/diagrams/scheduler-runtime.html' | relative_url }}" title="Booking on the scheduler runtime" style="width: 100%; height: 1080px; border: 1px solid #e6e6e6; border-radius: 8px;"></iframe>
+
+[Open the runtime diagram]({{ '/diagrams/scheduler-runtime.html' | relative_url }}) if the frame is too small.
+
 ```mermaid
 flowchart TB
   V["Validate ids and start"]:::app
