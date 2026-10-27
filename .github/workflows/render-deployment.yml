@@ -1,0 +1,73 @@
+name: Render Deployment Monitor
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '17 */6 * * *'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: render-deployment-tracking
+  cancel-in-progress: true
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    env:
+      RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+      RENDER_SERVICE_ID: srv-dbgd25rl550s738jtc9g
+      EXPECTED_SHA: ${{ github.sha }}
+      HEALTH_URL: https://keyloop-service-scheduler-29lh.onrender.com/api/health
+    steps:
+      - name: Monitor Render deployment and health
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json, os, sys, time, urllib.request, urllib.error
+          key=os.getenv("RENDER_API_KEY","")
+          service=os.environ["RENDER_SERVICE_ID"]
+          expected=os.environ["EXPECTED_SHA"]
+          health=os.environ["HEALTH_URL"]
+          api=f"https://api.render.com/v1/services/{service}/deploys?limit=50"
+          def read(url, token=None):
+              headers={"Accept":"application/json","User-Agent":"keyloop-github-actions"}
+              if token: headers["Authorization"]=f"Bearer {token}"
+              with urllib.request.urlopen(urllib.request.Request(url,headers=headers),timeout=25) as response:
+                  return json.load(response)
+          if key:
+              print("Tracking Render deployment matching commit",expected)
+              matched=False
+              for attempt in range(45):
+                  try:
+                      deployments=read(api,key)
+                      deploy=next((i.get("deploy",i) for i in deployments if (i.get("deploy",i).get("commit") or {}).get("id")==expected),None)
+                      if deploy:
+                          matched=True
+                          status=deploy["status"]
+                          print("Deployment:",deploy.get("id"),"status:",status,flush=True)
+                          if status=="live": break
+                          if status in ("build_failed","update_failed","pre_deploy_failed","canceled","deactivated"):
+                              sys.exit(f"Render deployment unsuccessful: {status}")
+                      else: print("Commit not yet found in Render's recent deployments.",flush=True)
+                  except Exception as e:
+                      print("Render API request failed:",str(e),flush=True)
+                      if attempt>=3: sys.exit("Cannot query Render API. Check RENDER_API_KEY permissions.")
+                  time.sleep(20)
+              else: sys.exit("Timed out waiting for matching Render deployment to become live")
+              if not matched: sys.exit("No Render deployment matched the commit")
+          else:
+              print("RENDER_API_KEY not set: checking availability only, NOT verifying the deployed commit.")
+          for attempt in range(15):
+              try:
+                  data=read(health)
+                  if data.get("status")=="ok":
+                      print("PASS: public API health endpoint is healthy")
+                      with open(os.environ["GITHUB_STEP_SUMMARY"],"a") as out:
+                          out.write(f"### Render deployment monitor\n\n- Service: [Render dashboard](https://dashboard.render.com/web/{service})\n- Demo: {health.removesuffix('/api/health')}\n- Health: **OK**\n- Commit-specific check: **{'Passed' if key else 'Not configured'}**\n")
+                      sys.exit(0)
+                  print("Unexpected health result:",data)
+              except Exception as e: print("Health check retry:",str(e),flush=True)
+              time.sleep(15)
+          sys.exit("Public API health check failed")
+          PY
