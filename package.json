@@ -1,0 +1,14 @@
+{
+  "name": "keyloop-unified-service-scheduler",
+  "private": true,
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "build": "npm run build -w @scheduler/web && npm run build -w @scheduler/api",
+    "test": "npm run test -w @scheduler/api"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

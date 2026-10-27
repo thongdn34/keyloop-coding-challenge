@@ -1,0 +1,2 @@
+import 'reflect-metadata';import {NestFactory} from '@nestjs/core';import {AppModule} from './app.module';import {DataSource} from 'typeorm';import {seed} from './seed';
+async function main(){const app=await NestFactory.create(AppModule);app.enableShutdownHooks();await seed(app.get(DataSource));await app.listen(Number(process.env.PORT)||3000,'0.0.0.0');}main().catch(e=>{console.error(e);process.exit(1)});
