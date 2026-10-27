@@ -6,9 +6,16 @@
   ],
   "scripts": {
     "build": "npm run build -w @scheduler/web && npm run build -w @scheduler/api",
-    "test": "npm run test -w @scheduler/api"
+    "test": "npm run test -w @scheduler/api",
+    "e2e": "playwright test",
+    "format": "prettier --write \"apps/{api,web}/**/*\"",
+    "format:check": "prettier --check \"apps/{api,web}/**/*\""
   },
   "engines": {
     "node": ">=22"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.64.1",
+    "prettier": "^3.6.2"
   }
 }

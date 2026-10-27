@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "build": "tsc -b && vite build",
-    "dev": "vite --host 0.0.0.0"
+    "dev": "vite --host 0.0.0.0",
+    "e2e:ui": "playwright test --ui --config ../../playwright.config.ts"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.66.0",

@@ -1,3 +1,11 @@
 node_modules
 **/dist
 .env
+**/*.tsbuildinfo
+.cursor
+docs/ai
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+.archify

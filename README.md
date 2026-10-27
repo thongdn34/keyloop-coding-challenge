@@ -10,7 +10,7 @@ Deployed on Render (Singapore) using the Docker web service `srv-dbgd25rl550s738
 
 ## CI and Render deployment tracking
 
-- [Build & Test](https://github.com/thongdn34/keyloop-coding-challenge/actions/workflows/ci.yml): verifies Jest tests, TypeScript builds and Docker image on pushes and pull requests.
+- [Build & Test](https://github.com/thongdn34/keyloop-coding-challenge/actions/workflows/ci.yml): verifies Jest tests, Playwright end-to-end tests, TypeScript builds and the Docker image on pushes and pull requests.
 - [Render Deployment Monitor](https://github.com/thongdn34/keyloop-coding-challenge/actions/workflows/render-deployment.yml): runs on changes to `main`, manual dispatch, and every six hours. Render **automatically deploys pushes to `main`**; this workflow monitors rather than triggering a duplicate deployment.
 - Set the GitHub Actions repository secret `RENDER_API_KEY` (Render Dashboard → Account Settings → API Keys) to enable commit-specific tracking through Render's Deploy API. The key is never printed. Without it, the workflow performs only an HTTP availability smoke test and **cannot establish which commit was deployed**.
 - Deployment-specific status can also be inspected in the [Render Dashboard](https://dashboard.render.com/web/srv-dbgd25rl550s738jtc9g). The Render web service must have `DATABASE_URL` set to the database's **Internal Database URL** via Render's Environment settings; never put credentials in this repository.
@@ -22,7 +22,7 @@ Deployed on Render (Singapore) using the Docker web service `srv-dbgd25rl550s738
 docker compose up --build
 ```
 
-Visit http://localhost:3000; GET /api/health returns `{"status":"ok"}`.
+Visit http://localhost:3000; `GET /api/health` verifies PostgreSQL and returns `{"status":"ok","database":"ok"}`.
 
 ## API
 
@@ -30,22 +30,28 @@ Visit http://localhost:3000; GET /api/health returns `{"status":"ok"}`.
 - `POST /api/availability` — advisory availability check
 - `POST /api/appointments` — atomic booking with PostgreSQL transaction-level advisory locking per dealership
 - `GET /api/appointments` — persisted appointment list
+- `GET /api/metrics` — Prometheus request, error, and duration metrics
 
 Example JSON: `{"dealershipId":1,"vehicleId":1,"serviceTypeId":1,"startAt":"2026-12-01T09:00:00+07:00"}`.
 
 ## Decisions and limitations
 
-The appointment records reference a customer's existing vehicle. Technician skills are stored separately. The booking transaction serializes simultaneous requests for the same dealership and checks resource overlap for the entire duration. Service hours, cancellations, holidays, and authentication are intentionally out of scope for this demonstration. Time entries must include timezone offsets; the UI converts local input to UTC.
+The appointment records reference a customer's existing vehicle. Technician skills are stored separately. The booking transaction serializes simultaneous requests for the same dealership and checks resource overlap for the entire duration. Stable first-fit assignment chooses the lowest-id free bay and qualified technician. Service hours, cancellations, holidays, and authentication are designed in the system design but are not implemented in this demonstration. Time entries must include timezone offsets; fractional seconds are accepted and the UI converts local input to UTC.
 
-Development uses TypeORM `synchronize: true`; production systems should replace it with versioned migrations and stronger database constraints. Seed data is illustrative.
+All environments use versioned TypeORM migrations with schema synchronization disabled. Foreign keys, interval checks, and overlap-query indexes are declared in the baseline migration. Seed data is illustrative.
 
 ## Test
 
 ```bash
 npm install
+npx playwright install chromium
 npm test
 npm run build
+npm run e2e
+npm run e2e:ui -w @scheduler/web
 ```
+
+`npm test` runs the API unit tests. `npm run e2e` runs the Playwright suites in `e2e/` for resource-constrained booking, the real-time bay and technician check, and the persisted appointment. The runner uses http://localhost:3000 when the app is already up, and otherwise starts it with `docker compose up --build`. `npm run e2e:ui -w @scheduler/web` opens Playwright UI mode for those same suites.
 
 ## AI Collaboration Narrative
 
