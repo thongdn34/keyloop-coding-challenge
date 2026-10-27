@@ -53,4 +53,4 @@ AI was used to outline the architecture and generate the initial implementation,
 
 ## Architecture
 
-See [System Design](docs/SYSTEM_DESIGN.md).
+Published design: [Unified Service Scheduler system design](https://thongdn34.github.io/keyloop-coding-challenge/). Source: [docs/SYSTEM_DESIGN.md](docs/SYSTEM_DESIGN.md).

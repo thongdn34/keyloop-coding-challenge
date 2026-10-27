@@ -1,0 +1,15 @@
+title: Unified Service Scheduler
+description: System design for the Keyloop Scenario A service scheduler.
+remote_theme: just-the-docs/just-the-docs
+url: https://thongdn34.github.io
+baseurl: /keyloop-coding-challenge
+color_scheme: light
+search_enabled: true
+heading_anchors: true
+aux_links:
+  Live demo: https://keyloop-service-scheduler-29lh.onrender.com/
+  Repository: https://github.com/thongdn34/keyloop-coding-challenge
+aux_links_new_tab: true
+plugins:
+  - jekyll-remote-theme
+footer_content: "The repository file docs/SYSTEM_DESIGN.md is the source. This site is a view of that file."
