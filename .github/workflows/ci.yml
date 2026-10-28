@@ -11,19 +11,41 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: scheduler
+          POSTGRES_USER: scheduler
+          POSTGRES_PASSWORD: scheduler
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U scheduler"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://scheduler:scheduler@localhost:5432/scheduler
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
       - name: Install dependencies
-        run: npm install --no-audit --no-fund
-      - name: Unit tests
+        run: npm ci
+      - name: Check formatting
+        run: npm run format:check
+      - name: Unit and PostgreSQL tests
         run: npm test
+      - name: Web module tests
+        run: npm run test:web
       - name: TypeScript production build
         run: npm run build
+      - name: Migration smoke test
+        run: node apps/api/dist/migrate.js && node apps/api/dist/migrate.js
       - name: Docker image build
-        run: docker build -t unified-service-scheduler:ci .
+        run: docker build --build-arg GIT_COMMIT=${{ github.sha }} -t unified-service-scheduler:ci .
   e2e:
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -33,8 +55,15 @@ jobs:
         with:
           node-version: "22"
       - name: Install dependencies
-        run: npm install --no-audit --no-fund
+        run: npm ci
       - name: Install Playwright browser
         run: npx playwright install --with-deps chromium
       - name: End-to-end tests
         run: npm run e2e
+      - name: Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          if-no-files-found: ignore

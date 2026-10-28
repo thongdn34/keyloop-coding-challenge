@@ -4,7 +4,8 @@
   "private": true,
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "test": "jest --runInBand"
+    "test": "jest --runInBand",
+    "migrate": "node dist/migrate.js"
   },
   "dependencies": {
     "@nestjs/common": "^10.4.15",

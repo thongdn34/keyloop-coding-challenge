@@ -1,15 +1,29 @@
 import "reflect-metadata";
 import { NestFactory } from "@nestjs/core";
-import { AppModule } from "./app.module";
 import { DataSource } from "typeorm";
-import { seed } from "./seed";
+import { AppModule } from "./app.module";
+import { validateRuntimeConfig } from "./config/runtime.config";
+import { runMigrationsOnce } from "./database/data-source";
+import { LoggingFilter } from "./common/observability/observability";
+import { seed } from "./seed/seed";
+
 async function main() {
+  validateRuntimeConfig();
   const app = await NestFactory.create(AppModule);
   app.enableShutdownHooks();
-  await seed(app.get(DataSource));
+  app.useGlobalFilters(new LoggingFilter());
+  const db = app.get(DataSource);
+  if (process.env.RUN_MIGRATIONS !== "false") {
+    await runMigrationsOnce(db);
+  }
+  await seed(db, {
+    catalog: process.env.SEED === "true",
+    users: process.env.SEED === "true" || process.env.DEMO_AUTH === "true",
+  });
   await app.listen(Number(process.env.PORT) || 3000, "0.0.0.0");
 }
-main().catch((e) => {
-  console.error(e);
+
+main().catch((error) => {
+  console.error(error);
   process.exit(1);
 });

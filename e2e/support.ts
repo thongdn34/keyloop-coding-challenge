@@ -4,76 +4,23 @@ import {
   type APIResponse,
   type Page,
 } from "@playwright/test";
+import type {
+  Appointment,
+  AppointmentPage,
+  Availability,
+  BookingRequest,
+  Catalog,
+  CatalogItem,
+} from "../contracts/types";
+import {
+  addMinutes,
+  formatDuration,
+  localValue,
+  withOffset,
+} from "../apps/web/src/time";
 
-export type CatalogItem = {
-  id: number;
-  name: string;
-  city?: string;
-  durationMinutes?: number;
-  make?: string;
-  model?: string;
-  registration?: string;
-  customerId?: number;
-  email?: string;
-};
-
-export type Catalog = {
-  dealerships: CatalogItem[];
-  vehicles: CatalogItem[];
-  services: CatalogItem[];
-  customers: CatalogItem[];
-};
-
-export type Availability = {
-  available: boolean;
-  startAt: string;
-  endAt: string;
-  durationMinutes: number;
-  technician: { id: number; name: string } | null;
-  serviceBay: { id: number; name: string } | null;
-};
-
-export type Appointment = {
-  id: number;
-  dealershipId: number;
-  customerId: number;
-  vehicleId: number;
-  serviceTypeId: number;
-  technicianId: number;
-  serviceBayId: number;
-  startAt: string;
-  endAt: string;
-  status: string;
-};
-
-export type BookingRequest = {
-  dealershipId: number;
-  vehicleId: number;
-  serviceTypeId: number;
-  startAt: string;
-};
-
-export function localDateTimeValue(date: Date) {
-  const pad = (part: number) => String(part).padStart(2, "0");
-  return (
-    `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}` +
-    `T${pad(date.getHours())}:${pad(date.getMinutes())}`
-  );
-}
-
-/** Same offset conversion the booking form uses. Node and the browser must share a timezone. */
-export function withOffset(value: string) {
-  const date = new Date(value);
-  const pad = (part: number) => String(part).padStart(2, "0");
-  const offset = -date.getTimezoneOffset();
-  const sign = offset >= 0 ? "+" : "-";
-  const absolute = Math.abs(offset);
-  return (
-    `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}` +
-    `T${pad(date.getHours())}:${pad(date.getMinutes())}:00` +
-    `${sign}${pad(Math.floor(absolute / 60))}:${pad(absolute % 60)}`
-  );
-}
+export type { Appointment, Availability, BookingRequest, Catalog, CatalogItem };
+export const localDateTimeValue = localValue;
 
 export function expectSameInstant(actual: string, localValue: string) {
   expect(new Date(actual).toISOString()).toBe(
@@ -81,19 +28,7 @@ export function expectSameInstant(actual: string, localValue: string) {
   );
 }
 
-export function addMinutes(value: string, minutes: number) {
-  const date = new Date(value);
-  date.setMinutes(date.getMinutes() + minutes);
-  return localDateTimeValue(date);
-}
-
-export function formatDuration(minutes: number) {
-  const hours = Math.floor(minutes / 60);
-  const remainder = minutes % 60;
-  if (hours && remainder) return `${hours} hr ${remainder} min`;
-  if (hours) return hours === 1 ? "1 hour" : `${hours} hours`;
-  return `${remainder} min`;
-}
+export { addMinutes, formatDuration, withOffset };
 
 async function readJson<T>(response: APIResponse): Promise<T> {
   if (!response.ok()) {
@@ -104,12 +39,84 @@ async function readJson<T>(response: APIResponse): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-export async function loadCatalog(request: APIRequestContext) {
-  return readJson<Catalog>(await request.get("/api/catalog"));
+const DEMO_PASSWORD = "scheduler-demo";
+
+export const demoAccounts = {
+  coordinator: {
+    username: "coordinator",
+    button: "Sign in as coordinator",
+  },
+  central: {
+    username: "central.advisor",
+    button: "Sign in as Central advisor",
+  },
+  riverside: {
+    username: "riverside.advisor",
+    button: "Sign in as Riverside advisor",
+  },
+} as const;
+
+export type DemoAccount = keyof typeof demoAccounts;
+
+const tokens = new Map<string, Promise<string>>();
+
+export async function sessionToken(
+  request: APIRequestContext,
+  account: DemoAccount = "coordinator",
+) {
+  const username = demoAccounts[account].username;
+  const existing = tokens.get(username);
+  if (existing) return existing;
+  const pending = readJson<{ token: string }>(
+    await request.post("/api/session", {
+      data: { username, password: DEMO_PASSWORD },
+    }),
+  ).then((body) => body.token);
+  tokens.set(username, pending);
+  return pending;
 }
 
-export async function listAppointments(request: APIRequestContext) {
-  return readJson<Appointment[]>(await request.get("/api/appointments"));
+function authorized(token: string) {
+  return { authorization: `Bearer ${token}` };
+}
+
+export async function loadCatalog(
+  request: APIRequestContext,
+  account: DemoAccount = "coordinator",
+) {
+  const token = await sessionToken(request, account);
+  return readJson<Catalog>(
+    await request.get("/api/catalog", { headers: authorized(token) }),
+  );
+}
+
+export async function listAppointments(
+  request: APIRequestContext,
+  account: DemoAccount = "coordinator",
+) {
+  const token = await sessionToken(request, account);
+  const from = new Date();
+  from.setHours(0, 0, 0, 0);
+  const to = new Date(from);
+  to.setDate(to.getDate() + 90);
+  const items: Appointment[] = [];
+  let cursor: string | null = null;
+  do {
+    const params = new URLSearchParams({
+      from: withOffset(localDateTimeValue(from)),
+      to: withOffset(localDateTimeValue(to)),
+      limit: "50",
+    });
+    if (cursor) params.set("cursor", cursor);
+    const page = await readJson<AppointmentPage>(
+      await request.get(`/api/appointments?${params}`, {
+        headers: authorized(token),
+      }),
+    );
+    items.push(...page.items);
+    cursor = page.nextCursor;
+  } while (cursor);
+  return items;
 }
 
 export function byName(items: CatalogItem[], name: string) {
@@ -156,16 +163,33 @@ export async function bookApi(
   request: APIRequestContext,
   booking: BookingRequest,
 ) {
+  const token = await sessionToken(request);
   return readJson<Appointment>(
-    await request.post("/api/appointments", { data: booking }),
+    await request.post("/api/appointments", {
+      data: booking,
+      headers: {
+        ...authorized(token),
+        "idempotency-key": `e2e-${crypto.randomUUID()}`,
+      },
+    }),
   );
 }
 
-export async function openBooking(page: Page) {
+export async function signInAs(page: Page, account: DemoAccount = "coordinator") {
   await page.goto("/", { waitUntil: "domcontentloaded" });
+  const signIn = page.getByRole("button", {
+    name: demoAccounts[account].button,
+  });
+  if (await signIn.isVisible().catch(() => false)) {
+    await signIn.click();
+  }
   await expect(
     page.getByRole("heading", { name: "Where should we book?" }),
   ).toBeVisible();
+}
+
+export async function openBooking(page: Page) {
+  await signInAs(page, "coordinator");
 }
 
 export async function chooseWorkshop(

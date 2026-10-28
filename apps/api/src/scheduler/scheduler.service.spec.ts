@@ -8,8 +8,13 @@ import {
   ServiceType,
   Technician,
   Vehicle,
-} from "./entities";
-import { overlaps, SchedulerService, validStart } from "./scheduler.service";
+} from "../database/entities";
+import {
+  assertWindow,
+  overlaps,
+  SchedulerService,
+  validStart,
+} from "./scheduler.service";
 
 describe("booking overlap", () => {
   const date = (hour: number) =>
@@ -41,6 +46,14 @@ describe("start validation", () => {
   });
 });
 
+describe("appointment window", () => {
+  it("rejects an unbounded history range", () => {
+    const from = new Date("2026-01-01T00:00:00Z");
+    const to = new Date("2026-06-01T00:00:00Z");
+    expect(() => assertWindow(from, to)).toThrow(BadRequestException);
+  });
+});
+
 function concurrencyTestDatabase() {
   const appointments: Appointment[] = [];
   const dealership = { id: 1 } as Dealership;
@@ -57,14 +70,30 @@ function concurrencyTestDatabase() {
     const builder = {
       innerJoin: jest.fn(),
       where: jest.fn(),
+      andWhere: jest.fn(),
       orderBy: jest.fn(),
-      getMany: jest.fn(async () =>
-        entity === Technician ? [technician] : [...appointments],
-      ),
+      limit: jest.fn(),
+      getOne: jest.fn(async () => {
+        if (entity === ServiceBay) {
+          return appointments.some((item) => item.serviceBayId === bay.id)
+            ? null
+            : bay;
+        }
+        if (entity === Technician) {
+          return appointments.some(
+            (item) => item.technicianId === technician.id,
+          )
+            ? null
+            : technician;
+        }
+        return null;
+      }),
     };
     builder.innerJoin.mockReturnValue(builder);
     builder.where.mockReturnValue(builder);
+    builder.andWhere.mockReturnValue(builder);
     builder.orderBy.mockReturnValue(builder);
+    builder.limit.mockReturnValue(builder);
     return builder;
   };
 

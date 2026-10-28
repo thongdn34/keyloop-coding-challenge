@@ -5,7 +5,6 @@ import {
   ArrowRight,
   Building2,
   CalendarDays,
-  CalendarOff,
   Car,
   Check,
   CircleAlert,
@@ -16,90 +15,51 @@ import {
   UserRound,
   Wrench,
 } from "lucide-react";
-
-type Item = {
-  id: number;
-  name: string;
-  durationMinutes?: number;
-  make?: string;
-  model?: string;
-  registration?: string;
-  city?: string;
-  email?: string;
-  customerId?: number;
-};
-
-type Catalog = {
-  dealerships: Item[];
-  vehicles: Item[];
-  services: Item[];
-  customers: Item[];
-};
-
-type Resource = { id: number; name: string } | null;
-
-type Availability = {
-  available: boolean;
-  startAt: string;
-  endAt: string;
-  technician: Resource;
-  serviceBay: Resource;
-  durationMinutes: number;
-};
-
-type AppointmentRecord = {
-  id: number;
-  dealershipId: number;
-  customerId: number;
-  vehicleId: number;
-  serviceTypeId: number;
-  technicianId: number;
-  serviceBayId: number;
-  startAt: string;
-  endAt: string;
-  status: string;
-};
+import type {
+  Appointment,
+  AppointmentPage,
+  Availability,
+  Catalog,
+  CatalogItem,
+} from "../../../contracts/types.ts";
+import {
+  readSession,
+  request,
+  SessionExpired,
+  setSession,
+  signIn,
+} from "./api.ts";
+import { openCount, sortSchedule } from "./booking.ts";
+import { Choice } from "./Choice.tsx";
+import { LoginScreen } from "./LoginScreen.tsx";
+import { SchedulePanel } from "./SchedulePanel.tsx";
+import {
+  addLocalDays,
+  defaultSlot,
+  formatDuration,
+  localValue,
+  startOfLocalDay,
+  timeIssue,
+  withOffset,
+} from "./time.ts";
 
 type Issue = { href: string; message: string };
 
 const icon = { size: 20, strokeWidth: 2, "aria-hidden": true as const };
+const DEMO_PASSWORD = "scheduler-demo";
 
-async function request<T>(path: string, body?: unknown): Promise<T> {
-  const response = await fetch("/api/" + path, {
-    method: body ? "POST" : "GET",
-    headers: body ? { "Content-Type": "application/json" } : undefined,
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  if (!response.ok) {
-    const payload = (await response.json().catch(() => ({}))) as {
-      message?: string | string[];
-    };
-    const message = Array.isArray(payload.message)
-      ? payload.message.join(", ")
-      : payload.message || "Request failed";
-    throw new Error(message);
+async function loadAppointments(from: string, to: string) {
+  const items: Appointment[] = [];
+  let cursor: string | null = null;
+  for (let page = 0; page < 10; page += 1) {
+    const params = new URLSearchParams({ from, to, limit: "50" });
+    if (cursor) params.set("cursor", cursor);
+    const body = await request<AppointmentPage>(`appointments?${params}`);
+    items.push(...body.items);
+    cursor = body.nextCursor;
+    if (!cursor) break;
   }
-  return response.json() as Promise<T>;
-}
-
-function localValue(date: Date) {
-  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
-  return local.toISOString().slice(0, 16);
-}
-
-function defaultSlot() {
-  const date = new Date();
-  date.setDate(date.getDate() + 1);
-  date.setHours(9, 0, 0, 0);
-  return localValue(date);
-}
-
-function formatDuration(minutes: number) {
-  const hours = Math.floor(minutes / 60);
-  const remainder = minutes % 60;
-  if (hours && remainder) return `${hours} hr ${remainder} min`;
-  if (hours) return hours === 1 ? "1 hour" : `${hours} hours`;
-  return `${remainder} min`;
+  return items;
 }
 
 function zoneName(value: string) {
@@ -131,74 +91,6 @@ function formatWhen(iso: string) {
   };
 }
 
-function withOffset(value: string) {
-  const date = new Date(value);
-  const pad = (part: number) => String(part).padStart(2, "0");
-  const offset = -date.getTimezoneOffset();
-  const sign = offset >= 0 ? "+" : "-";
-  const absolute = Math.abs(offset);
-  return (
-    `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}` +
-    `T${pad(date.getHours())}:${pad(date.getMinutes())}:00` +
-    `${sign}${pad(Math.floor(absolute / 60))}:${pad(absolute % 60)}`
-  );
-}
-
-function timeIssue(value: string): string | null {
-  if (!value) return "Choose an appointment date and time.";
-  const date = new Date(value);
-  if (!Number.isFinite(date.getTime())) return "Enter a valid date and time.";
-  if (date.getTime() <= Date.now()) return "Choose a time in the future.";
-  return null;
-}
-
-function visitState(item: AppointmentRecord, now: number) {
-  const start = new Date(item.startAt).getTime();
-  const end = new Date(item.endAt).getTime();
-  if (end <= now) return "Completed";
-  if (start <= now) return "In progress";
-  return "Upcoming";
-}
-
-function Choice({
-  id,
-  name,
-  checked,
-  onChange,
-  disabled = false,
-  title,
-  detail,
-  glyph,
-}: {
-  id: string;
-  name: string;
-  checked: boolean;
-  onChange: () => void;
-  disabled?: boolean;
-  title: string;
-  detail: string;
-  glyph: JSX.Element;
-}) {
-  return (
-    <label className="choice" htmlFor={id}>
-      <input
-        id={id}
-        type="radio"
-        name={name}
-        checked={checked}
-        disabled={disabled}
-        onChange={onChange}
-      />
-      <span className="choice-icon">{glyph}</span>
-      <span className="choice-copy">
-        <span className="choice-title">{title}</span>
-        <span className="choice-detail">{detail}</span>
-      </span>
-      {checked ? <Check {...icon} /> : <span className="choice-spacer" />}
-    </label>
-  );
-}
-
 export default function App() {
   const queryClient = useQueryClient();
   const errorTitleId = useId();
@@ -207,13 +99,25 @@ export default function App() {
   const successRef = useRef<HTMLDivElement>(null);
   const skipStepFocus = useRef(true);
 
+  const [session, setSessionState] = useState(readSession);
+  const [signInError, setSignInError] = useState<string | null>(null);
+  const idempotencyKey = useRef<string | null>(null);
+  const windowStart = useMemo(() => startOfLocalDay(), []);
+  const [horizonDays, setHorizonDays] = useState(31);
+  const windowEnd = useMemo(
+    () => addLocalDays(windowStart, horizonDays),
+    [windowStart, horizonDays],
+  );
+
   const catalogQuery = useQuery({
-    queryKey: ["catalog"],
+    queryKey: ["catalog", session?.token],
+    enabled: Boolean(session),
     queryFn: () => request<Catalog>("catalog"),
   });
   const appointmentsQuery = useQuery({
-    queryKey: ["appointments"],
-    queryFn: () => request<AppointmentRecord[]>("appointments"),
+    queryKey: ["appointments", session?.token, windowStart, windowEnd],
+    enabled: Boolean(session),
+    queryFn: () => loadAppointments(windowStart, windowEnd),
   });
 
   const data = catalogQuery.data;
@@ -242,7 +146,7 @@ export default function App() {
     : (data?.services[0]?.id ?? 0);
 
   const lookups = useMemo(() => {
-    const index = (items: Item[] = []) =>
+    const index = (items: CatalogItem[] = []) =>
       new Map(items.map((item) => [item.id, item]));
     return {
       dealerships: index(data?.dealerships),
@@ -266,11 +170,27 @@ export default function App() {
     startAt: withOffset(time),
   };
 
+  const signInMutation = useMutation({
+    mutationFn: (username: string) => signIn(username, DEMO_PASSWORD),
+    onSuccess: (next) => {
+      setSessionState(next);
+      setSignInError(null);
+    },
+    onError: (error) => {
+      setSignInError(
+        error instanceof Error ? error.message : "Sign-in failed.",
+      );
+    },
+  });
   const check = useMutation({
-    mutationFn: () => request<Availability>("availability", payload),
+    mutationFn: () => request<Availability>("availability", { body: payload }),
   });
   const book = useMutation({
-    mutationFn: () => request<AppointmentRecord>("appointments", payload),
+    mutationFn: () =>
+      request<Appointment>("appointments", {
+        body: payload,
+        idempotencyKey: idempotencyKey.current ?? undefined,
+      }),
     onSuccess: (saved) => {
       setConfirmedId(saved.id);
       setIssues([]);
@@ -300,6 +220,7 @@ export default function App() {
     setResult(null);
     setConfirmedId(null);
     setIssues([]);
+    idempotencyKey.current = null;
     check.reset();
     book.reset();
   }
@@ -329,6 +250,7 @@ export default function App() {
     }
     try {
       const availability = await check.mutateAsync();
+      idempotencyKey.current = crypto.randomUUID();
       setResult(availability);
       setIssues([]);
       setConfirmedId(null);
@@ -396,23 +318,24 @@ export default function App() {
 
   const now = Date.now();
   const appointments = appointmentsQuery.data ?? [];
-  const upcomingCount = appointments.filter(
-    (item) => new Date(item.endAt).getTime() > now,
-  ).length;
-  const schedule = appointments
-    .filter((item) =>
+  const upcomingCount = openCount(appointments, now);
+  const schedule = sortSchedule(
+    appointments.filter((item) =>
       locationFilter === "all" ? true : item.dealershipId === locationFilter,
-    )
-    .slice()
-    .sort((a, b) => {
-      const aOpen = new Date(a.endAt).getTime() > now;
-      const bOpen = new Date(b.endAt).getTime() > now;
-      if (aOpen !== bOpen) return aOpen ? -1 : 1;
-      return new Date(a.startAt).getTime() - new Date(b.startAt).getTime();
-    });
-  const visibleOpen = schedule.filter(
-    (item) => new Date(item.endAt).getTime() > now,
-  ).length;
+    ),
+    now,
+  );
+  const visibleOpen = openCount(schedule, now);
+
+  useEffect(() => {
+    if (
+      catalogQuery.error instanceof SessionExpired ||
+      appointmentsQuery.error instanceof SessionExpired
+    ) {
+      setSession(null);
+      setSessionState(null);
+    }
+  }, [catalogQuery.error, appointmentsQuery.error]);
 
   const timeProblem = issues.find(
     (issue) => issue.href === "#appointment-time",
@@ -424,6 +347,31 @@ export default function App() {
       data.vehicles.length &&
       data.services.length,
   );
+
+  if (!session) {
+    return (
+      <>
+        <header className="site-header">
+          <div className="shell header-inner">
+            <div className="brand">
+              <span className="mark">
+                <CalendarDays size={24} strokeWidth={2} aria-hidden="true" />
+              </span>
+              <span>
+                <span className="brand-name">Appointment Scheduler</span>
+                <span className="brand-sub">Unified service booking</span>
+              </span>
+            </div>
+          </div>
+        </header>
+        <LoginScreen
+          pending={signInMutation.isPending}
+          error={signInError}
+          onSignIn={(username) => signInMutation.mutate(username)}
+        />
+      </>
+    );
+  }
 
   return (
     <>
@@ -443,8 +391,18 @@ export default function App() {
           </div>
           <p className={catalogQuery.isError ? "status down" : "status"}>
             <span className="status-dot" aria-hidden="true" />
-            {catalogQuery.isError ? "Catalog unavailable" : "Live booking"}
+            {catalogQuery.isError ? "Catalog unavailable" : session.username}
           </p>
+          <button
+            type="button"
+            className="btn-secondary"
+            onClick={() => {
+              setSession(null);
+              setSessionState(null);
+            }}
+          >
+            Sign out
+          </button>
         </div>
       </header>
       <main className="shell page">
@@ -825,9 +783,7 @@ export default function App() {
                         <dt>Customer</dt>
                         <dd>
                           <UserRound {...icon} />
-                          {customer
-                            ? `${customer.name} · ${customer.email}`
-                            : "Customer"}
+                          {customer ? customer.name : "Customer"}
                         </dd>
                       </div>
                       <div>
@@ -907,147 +863,26 @@ export default function App() {
             )}
           </section>
 
-          <aside className="schedule" aria-labelledby="schedule-heading">
-            <div className="panel-intro">
-              <h2 id="schedule-heading">Workshop diary</h2>
-              <p>
-                {appointmentsQuery.isLoading
-                  ? "Loading confirmed visits"
-                  : visibleOpen === 1
-                    ? "1 still open"
-                    : visibleOpen
-                      ? `${visibleOpen} still open`
-                      : "No open visits"}
-              </p>
-            </div>
-            <div
-              className="filters"
-              role="group"
-              aria-label="Filter by dealership"
-            >
-              <button
-                type="button"
-                className="filter"
-                aria-pressed={locationFilter === "all"}
-                onClick={() => setLocationFilter("all")}
-              >
-                All locations
-              </button>
-              {data?.dealerships.map((item) => (
-                <button
-                  key={item.id}
-                  type="button"
-                  className="filter"
-                  aria-pressed={locationFilter === item.id}
-                  onClick={() => setLocationFilter(item.id)}
-                >
-                  {item.name}
-                </button>
-              ))}
-            </div>
-            {appointmentsQuery.isLoading ? (
-              <div className="skeleton" aria-busy="true" aria-live="polite">
-                <span className="sr-only">Loading appointments</span>
-                <span className="skeleton-line" />
-                <span className="skeleton-line short" />
-                <span className="skeleton-line" />
-              </div>
-            ) : appointmentsQuery.isError ? (
-              <div className="banner bad" role="alert">
-                <CircleAlert {...icon} />
-                <div>
-                  <strong>Appointments could not be loaded.</strong>
-                  <p>{appointmentsQuery.error.message}</p>
-                  <button
-                    type="button"
-                    className="btn-secondary"
-                    onClick={() => void appointmentsQuery.refetch()}
-                  >
-                    Try again
-                  </button>
-                </div>
-              </div>
-            ) : schedule.length === 0 ? (
-              <div className="empty">
-                <CalendarOff size={28} strokeWidth={2} aria-hidden="true" />
-                <strong>
-                  {appointments.length
-                    ? "No appointments for this location"
-                    : "No appointments yet"}
-                </strong>
-                <p>
-                  {appointments.length
-                    ? "Try another workshop, or book a visit at this one."
-                    : "Confirmed visits will show here after you book."}
-                </p>
-                <a className="btn-secondary" href="#booking">
-                  Book an appointment
-                </a>
-              </div>
-            ) : (
-              <ul className="bookings">
-                {schedule.map((item) => {
-                  const when = formatWhen(item.startAt);
-                  const end = formatWhen(item.endAt);
-                  const bookedVehicle = lookups.vehicles.get(item.vehicleId);
-                  const bookedService = lookups.services.get(
-                    item.serviceTypeId,
-                  );
-                  const bookedDealer = lookups.dealerships.get(
-                    item.dealershipId,
-                  );
-                  const bookedCustomer = lookups.customers.get(item.customerId);
-                  const state =
-                    item.id === confirmedId
-                      ? "Just booked"
-                      : visitState(item, now);
-                  return (
-                    <li
-                      className={
-                        item.id === confirmedId ? "booking fresh" : "booking"
-                      }
-                      key={item.id}
-                    >
-                      <time className="when" dateTime={item.startAt}>
-                        <span>{when.month}</span>
-                        <strong>{when.day}</strong>
-                      </time>
-                      <div className="booking-copy">
-                        <strong>
-                          {bookedVehicle
-                            ? `${bookedVehicle.make} ${bookedVehicle.model}`
-                            : `Vehicle ${item.vehicleId}`}
-                        </strong>
-                        <p>
-                          {when.time}–{end.time}
-                        </p>
-                        {bookedService ? <p>{bookedService.name}</p> : null}
-                        <p>
-                          {[
-                            bookedDealer?.name,
-                            bookedCustomer?.name,
-                            bookedVehicle?.registration,
-                          ]
-                            .filter(Boolean)
-                            .join(" · ")}
-                        </p>
-                      </div>
-                      <span
-                        className={`chip chip-${state.replace(" ", "-").toLowerCase()}`}
-                      >
-                        {state}
-                      </span>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-            <p className="note">
-              <strong>One assignment at a time.</strong> Confirming a visit
-              keeps that technician and bay for the whole service, so two
-              bookings cannot claim the same resource.
-            </p>
-          </aside>
+          <SchedulePanel
+            loading={appointmentsQuery.isLoading}
+            error={
+              appointmentsQuery.isError ? appointmentsQuery.error.message : null
+            }
+            onRetry={() => void appointmentsQuery.refetch()}
+            appointments={appointments}
+            schedule={schedule}
+            visibleOpen={visibleOpen}
+            dealerships={data?.dealerships ?? []}
+            locationFilter={locationFilter}
+            onFilter={setLocationFilter}
+            lookups={lookups}
+            confirmedId={confirmedId}
+            now={now}
+            horizonDays={horizonDays}
+            onShowLater={() =>
+              setHorizonDays((days) => Math.min(days + 31, 93))
+            }
+          />
         </div>
       </main>
       <footer className="site-footer">

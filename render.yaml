@@ -8,3 +8,9 @@ services:
     envVars:
       - key: DATABASE_URL
         sync: false
+      - key: DEMO_AUTH
+        value: "true"
+      - key: RUN_MIGRATIONS
+        value: "true"
+      - key: SEED
+        value: "false"

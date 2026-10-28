@@ -7,9 +7,11 @@
   "scripts": {
     "build": "npm run build -w @scheduler/web && npm run build -w @scheduler/api",
     "test": "npm run test -w @scheduler/api",
+    "test:web": "node --experimental-strip-types --test apps/web/src/time.test.ts apps/web/src/booking.test.ts apps/web/src/api.test.ts",
+    "migrate": "npm run build -w @scheduler/api && node apps/api/dist/migrate.js",
     "e2e": "playwright test",
-    "format": "prettier --write \"apps/{api,web}/**/*\"",
-    "format:check": "prettier --check \"apps/{api,web}/**/*\""
+    "format": "prettier --write \"apps/{api,web}/**/*.{ts,tsx}\" \"e2e/**/*.ts\" \"contracts/**/*.ts\"",
+    "format:check": "prettier --check \"apps/{api,web}/**/*.{ts,tsx}\" \"e2e/**/*.ts\" \"contracts/**/*.ts\""
   },
   "engines": {
     "node": ">=22"

@@ -1,0 +1,42 @@
+export const openApiDocument = {
+  openapi: "3.0.3",
+  info: {
+    title: "Unified Service Scheduler",
+    version: "1.1.0",
+  },
+  paths: {
+    "/api/live": { get: { operationId: "live" } },
+    "/api/health": { get: { operationId: "health" } },
+    "/api/metrics": { get: { operationId: "metrics" } },
+    "/api/session": { post: { operationId: "session" } },
+    "/api/catalog": { get: { operationId: "catalog" } },
+    "/api/availability": { post: { operationId: "availability" } },
+    "/api/appointments": {
+      get: { operationId: "listAppointments" },
+      post: { operationId: "book" },
+    },
+  },
+  components: {
+    schemas: {
+      BookingRequest: {
+        type: "object",
+        additionalProperties: false,
+        required: ["dealershipId", "vehicleId", "serviceTypeId", "startAt"],
+        properties: {
+          dealershipId: { type: "integer", minimum: 1 },
+          vehicleId: { type: "integer", minimum: 1 },
+          serviceTypeId: { type: "integer", minimum: 1 },
+          startAt: { type: "string", format: "date-time" },
+        },
+      },
+      AppointmentPage: {
+        type: "object",
+        required: ["items", "nextCursor"],
+        properties: {
+          items: { type: "array" },
+          nextCursor: { type: "string", nullable: true },
+        },
+      },
+    },
+  },
+} as const;

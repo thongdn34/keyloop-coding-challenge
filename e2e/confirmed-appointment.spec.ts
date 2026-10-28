@@ -97,23 +97,8 @@ test.describe("confirmed appointment record", () => {
       `Booking ${saved.id} is saved.`,
     );
 
-    const listed = page.waitForResponse(
-      (response) =>
-        response.request().method() === "GET" &&
-        response.url().includes("/api/appointments") &&
-        response.ok(),
-    );
     await page.reload({ waitUntil: "domcontentloaded" });
-    const appointments = (await (await listed).json()) as Array<{
-      id: number;
-      status: string;
-      startAt: string;
-      endAt: string;
-      vehicleId: number;
-      serviceTypeId: number;
-      technicianId: number;
-      serviceBayId: number;
-    }>;
+    const appointments = await listAppointments(request);
     const reloaded = appointments.find((item) => item.id === saved.id);
     expect(reloaded).toMatchObject({
       status: "confirmed",

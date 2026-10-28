@@ -122,6 +122,27 @@ export class TechnicianSkill {
   serviceType!: ServiceType;
 }
 
+export type AppointmentStatus = "confirmed" | "cancelled";
+export type UserRole = "advisor" | "coordinator";
+
+@Entity("app_user")
+export class AppUser {
+  @PrimaryGeneratedColumn()
+  id!: number;
+
+  @Column()
+  username!: string;
+
+  @Column()
+  passwordHash!: string;
+
+  @Column()
+  role!: UserRole;
+
+  @Column({ type: "int", nullable: true })
+  dealershipId!: number | null;
+}
+
 @Entity()
 export class Appointment {
   @PrimaryGeneratedColumn()
@@ -176,7 +197,7 @@ export class Appointment {
   endAt!: Date;
 
   @Column({ default: "confirmed" })
-  status!: string;
+  status!: AppointmentStatus;
 }
 
 export const entities = [
@@ -188,4 +209,5 @@ export const entities = [
   Technician,
   TechnicianSkill,
   Appointment,
+  AppUser,
 ];

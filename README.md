@@ -22,36 +22,42 @@ Deployed on Render (Singapore) using the Docker web service `srv-dbgd25rl550s738
 docker compose up --build
 ```
 
-Visit http://localhost:3000; `GET /api/health` verifies PostgreSQL and returns `{"status":"ok","database":"ok"}`.
+Visit http://localhost:3000 and sign in. The demo password is `scheduler-demo` for `coordinator`, `central.advisor`, and `riverside.advisor`. `GET /api/health` verifies PostgreSQL and returns status, database, service version, and commit. `GET /api/live` does not touch the database.
+
+`SEED=true` loads the sample catalog only when the database is empty. `DEMO_AUTH=true` ensures the three demo users exist. Both are set by Docker Compose. Set `AUTH_SECRET` (at least 32 characters) before using real customer data. Set `RUN_MIGRATIONS=false` on extra replicas and run `npm run migrate` once per release.
 
 ## API
 
-- `GET /api/catalog` — dealerships, vehicles, services and customers
+- `POST /api/session` — demo sign-in; other data routes require `Authorization: Bearer`
+- `GET /api/catalog` — dealerships the caller may use, vehicles, services, and customer names
 - `POST /api/availability` — advisory availability check
-- `POST /api/appointments` — atomic booking with PostgreSQL transaction-level advisory locking per dealership
-- `GET /api/appointments` — persisted appointment list
-- `GET /api/metrics` — Prometheus request, error, and duration metrics
+- `POST /api/appointments` — booking under a dealership advisory lock, with optional `Idempotency-Key`
+- `GET /api/appointments?from&to` — one page inside a date window of at most 93 days
+- `GET /api/metrics` — Prometheus request, booking, and lock-wait metrics; production requires `METRICS_TOKEN`
 
 Example JSON: `{"dealershipId":1,"vehicleId":1,"serviceTypeId":1,"startAt":"2026-12-01T09:00:00+07:00"}`.
 
 ## Decisions and limitations
 
-The appointment records reference a customer's existing vehicle. Technician skills are stored separately. The booking transaction serializes simultaneous requests for the same dealership and checks resource overlap for the entire duration. Stable first-fit assignment chooses the lowest-id free bay and qualified technician. Service hours, cancellations, holidays, and authentication are designed in the system design but are not implemented in this demonstration. Time entries must include timezone offsets; fractional seconds are accepted and the UI converts local input to UTC.
+The appointment records reference a customer's existing vehicle. Technician skills are stored separately. The booking transaction serializes simultaneous requests for the same dealership, picks the lowest-id free bay and qualified technician in SQL, and PostgreSQL exclusion constraints reject overlapping confirmed assignments. Service hours, cancellations, and holidays are specified in the system design and are not implemented. Sign-in is a demo bearer token, not OpenID Connect. Time entries must include timezone offsets; the UI sends the local clock time with that offset.
+
+The free Render service can cold-start after inactivity. `render.yaml` does not provision PostgreSQL or backups. A free Render database expires after 30 days. Metrics stay in process memory unless `OTEL_EXPORTER_OTLP_ENDPOINT` is set for traces and an external system scrapes `/api/metrics`. The alert policy in the system design is not wired up.
 
 All environments use versioned TypeORM migrations with schema synchronization disabled. Foreign keys, interval checks, and overlap-query indexes are declared in the baseline migration. Seed data is illustrative.
 
 ## Test
 
 ```bash
-npm install
+npm ci
 npx playwright install chromium
 npm test
+npm run test:web
 npm run build
 npm run e2e
 npm run e2e:ui -w @scheduler/web
 ```
 
-`npm test` runs the API unit tests. `npm run e2e` runs the Playwright suites in `e2e/` for resource-constrained booking, the real-time bay and technician check, and the persisted appointment. The runner uses http://localhost:3000 when the app is already up, and otherwise starts it with `docker compose up --build`. `npm run e2e:ui -w @scheduler/web` opens Playwright UI mode for those same suites.
+`npm test` runs the API unit tests. If `DATABASE_URL` points at PostgreSQL, it also runs the concurrency, exclusion, idempotency, and authorization tests. CI provides that database. `npm run test:web` checks the time conversion, diary ordering, and API client without a browser. `npm run e2e` runs the Playwright suites in `e2e/` for resource-constrained booking, the real-time bay and technician check, and the persisted appointment. The runner uses http://localhost:3000 when the app is already up, and otherwise starts it with `docker compose up --build`. `npm run e2e:ui -w @scheduler/web` opens Playwright UI mode for those same suites.
 
 ## AI Collaboration Narrative
 

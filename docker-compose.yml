@@ -17,6 +17,9 @@ services:
       - "3000:3000"
     environment:
       DATABASE_URL: postgresql://scheduler:scheduler@db:5432/scheduler
+      SEED: "true"
+      DEMO_AUTH: "true"
+      RUN_MIGRATIONS: "true"
     depends_on:
       db:
         condition: service_healthy

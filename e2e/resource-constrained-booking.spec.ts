@@ -54,9 +54,7 @@ test.describe("resource constrained booking", () => {
     await expect(review).toContainText(
       `${vehicle.make} ${vehicle.model} · ${vehicle.registration}`,
     );
-    await expect(review).toContainText(
-      `${customer?.name} · ${customer?.email}`,
-    );
+    await expect(review).toContainText(customer?.name ?? "");
     await expect(review).toContainText(
       `${service.name} · ${formatDuration(service.durationMinutes ?? 0)}`,
     );
