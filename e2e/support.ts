@@ -175,7 +175,10 @@ export async function bookApi(
   );
 }
 
-export async function signInAs(page: Page, account: DemoAccount = "coordinator") {
+export async function signInAs(
+  page: Page,
+  account: DemoAccount = "coordinator",
+) {
   await page.goto("/", { waitUntil: "domcontentloaded" });
   const signIn = page.getByRole("button", {
     name: demoAccounts[account].button,

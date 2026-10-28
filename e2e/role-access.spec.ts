@@ -1,5 +1,11 @@
 import { expect, test } from "@playwright/test";
-import { byName, loadCatalog, sessionToken, signInAs, vehicleNamed } from "./support";
+import {
+  byName,
+  loadCatalog,
+  sessionToken,
+  signInAs,
+  vehicleNamed,
+} from "./support";
 
 test.describe("dealership roles", () => {
   test("an advisor can see and book only their own workshop", async ({
