@@ -306,6 +306,20 @@ export default function App() {
     void confirmBooking();
   }
 
+  function endSession() {
+    setSession(null);
+    setSessionState(null);
+    setStep(1);
+    setDealershipId(null);
+    setVehicleId(null);
+    setServiceTypeId(null);
+    setTime(defaultSlot());
+    setLocationFilter("all");
+    setHorizonDays(31);
+    clearOutcome();
+    queryClient.removeQueries();
+  }
+
   function bookAnother() {
     setConfirmedId(null);
     setResult(null);
@@ -332,8 +346,7 @@ export default function App() {
       catalogQuery.error instanceof SessionExpired ||
       appointmentsQuery.error instanceof SessionExpired
     ) {
-      setSession(null);
-      setSessionState(null);
+      endSession();
     }
   }, [catalogQuery.error, appointmentsQuery.error]);
 
@@ -393,14 +406,7 @@ export default function App() {
             <span className="status-dot" aria-hidden="true" />
             {catalogQuery.isError ? "Catalog unavailable" : session.username}
           </p>
-          <button
-            type="button"
-            className="btn-secondary"
-            onClick={() => {
-              setSession(null);
-              setSessionState(null);
-            }}
-          >
+          <button type="button" className="btn-secondary" onClick={endSession}>
             Sign out
           </button>
         </div>

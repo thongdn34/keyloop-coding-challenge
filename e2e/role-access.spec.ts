@@ -1,7 +1,10 @@
 import { expect, test } from "@playwright/test";
 import {
   byName,
+  demoAccounts,
+  freeSlot,
   loadCatalog,
+  requestAppointment,
   sessionToken,
   signInAs,
   vehicleNamed,
@@ -67,6 +70,35 @@ test.describe("dealership roles", () => {
     await expect(
       page.getByRole("radio", { name: new RegExp(central.name) }),
     ).toHaveCount(0);
+  });
+
+  test("signing out clears the previous user's booking", async ({
+    page,
+    request,
+  }) => {
+    const catalog = await loadCatalog(request);
+    const service = byName(catalog.services, "Oil & filter change");
+    const when = await freeSlot(request, service.durationMinutes ?? 60);
+    await requestAppointment(page, {
+      dealership: "Central Auto Service",
+      vehicle: /Toyota Corolla/,
+      service: service.name,
+      when,
+    });
+    await expect(
+      page.getByRole("heading", { name: "Confirm the appointment" }),
+    ).toBeVisible();
+
+    await page.getByRole("button", { name: "Sign out" }).click();
+    await page
+      .getByRole("button", { name: demoAccounts.riverside.button })
+      .click();
+    await expect(
+      page.getByRole("heading", { name: "Where should we book?" }),
+    ).toBeVisible();
+    await expect(page.getByText("A bay and technician are free")).toHaveCount(
+      0,
+    );
   });
 
   test("the coordinator receives both workshops", async ({ request }) => {
